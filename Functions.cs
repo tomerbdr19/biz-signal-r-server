@@ -1,74 +1,91 @@
 using System;
-using System.IO;
-using System.Linq;
-using System.Net.Http;
 using System.Threading.Tasks;
+using System.Collections.Generic;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.WebJobs;
 using Microsoft.Azure.WebJobs.Extensions.Http;
 using Microsoft.Azure.WebJobs.Extensions.SignalRService;
-using Newtonsoft.Json;
 
 namespace CSharp
 {
     public static class Function
     {
-        private static HttpClient httpClient = new HttpClient();
-        private static string Etag = string.Empty;
-        private static string StarCount = "0";
-
-        [FunctionName("index")]
-        public static IActionResult GetHomePage([HttpTrigger(AuthorizationLevel.Anonymous)] HttpRequest req, ExecutionContext context)
-        {
-            var path = Path.Combine(context.FunctionAppDirectory, "content", "index.html");
-            return new ContentResult
-            {
-                Content = File.ReadAllText(path),
-                ContentType = "text/html",
-            };
-        }
+        private static Dictionary<string,string> connectionMap = new(); 
 
         [FunctionName("negotiate")]
         public static SignalRConnectionInfo Negotiate(
             [HttpTrigger(AuthorizationLevel.Anonymous)] HttpRequest req,
-            [SignalRConnectionInfo(HubName = "serverless", UserId = "{headers.x-ms-client-principal-id}")] SignalRConnectionInfo connectionInfo)
+            [SignalRConnectionInfo(HubName = "serverless")] SignalRConnectionInfo connectionInfo)
         {
+            Console.WriteLine(connectionInfo.AccessToken);
             return connectionInfo;
         }
 
-        [FunctionName("broadcast")]
-        public static async Task Broadcast([TimerTrigger("*/5 * * * * *")] TimerInfo myTimer,
+        [FunctionName("sendMessage")]
+        public static Task SendMessage(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post")] RequestType message,
         [SignalR(HubName = "serverless")] IAsyncCollector<SignalRMessage> signalRMessages)
         {
-            var request = new HttpRequestMessage(HttpMethod.Get, "https://api.github.com/repos/azure/azure-signalr");
-            request.Headers.UserAgent.ParseAdd("Serverless");
-            request.Headers.Add("If-None-Match", Etag);
-            var response = await httpClient.SendAsync(request);
-            if (response.Headers.Contains("Etag"))
-            {
-                Etag = response.Headers.GetValues("Etag").First();
-            }
-            if (response.StatusCode == System.Net.HttpStatusCode.OK)
-            {
-                var result = JsonConvert.DeserializeObject<GitResult>(await response.Content.ReadAsStringAsync());
-                StarCount = result.StarCount;
+            if (!connectionMap.ContainsKey(message.SendToId)) {
+                return Task.CompletedTask;
             }
 
-            await signalRMessages.AddAsync(
+            var connectionId = connectionMap[message.SendToId];
+            Console.WriteLine("Send message -> " + message.SendToId);
+
+            return signalRMessages.AddAsync(
                 new SignalRMessage
                 {
+                    // the message will only be sent to this user ID
+                    ConnectionId = connectionId,
                     Target = "newMessage",
-                    Arguments = new[] { $"Current star count of https://github.com/Azure/azure-signalr is: {StarCount}" }
+                    Arguments = new[] { message.Data }
                 });
         }
 
-
-        private class GitResult
+        [FunctionName("redeemCoupon")]
+        public static Task redeemCoupon(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post")] RequestType message,
+        [SignalR(HubName = "serverless")] IAsyncCollector<SignalRMessage> signalRMessages)
         {
-            [JsonRequired]
-            [JsonProperty("stargazers_count")]
-            public string StarCount { get; set; }
+            if (!connectionMap.ContainsKey(message.SendToId)) {
+                return Task.CompletedTask;
+            }
+
+            var connectionId = connectionMap[message.SendToId];
+            
+            Console.WriteLine("Redeem coupon -> " + message.SendToId);
+
+            return signalRMessages.AddAsync(
+                new SignalRMessage
+                {
+                    // the message will only be sent to this user ID
+                    ConnectionId = connectionId,
+                    Target = "redeemCoupon",
+                });
+        }
+
+        [FunctionName("Connect")]
+        public static Task Connect(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post")] ConnectType message,
+        [SignalR(HubName = "serverless")] IAsyncCollector<SignalRMessage> signalRMessages)
+        {
+            Console.WriteLine("New Connection: \n" + "UserId: " + message.UserId + "\n" + "ConnectionId: " + message.ConnectionId);
+
+            connectionMap.Remove(message.UserId);
+            connectionMap.Add(message.UserId, message.ConnectionId);
+
+            return Task.CompletedTask;
+        }
+
+        public class RequestType {
+            public object Data {get; set;}
+            public string SendToId {get; set;}
+        }
+
+        public class ConnectType {
+            public string ConnectionId {get; set;}
+            public string UserId {get; set;}
         }
     }
 }
