@@ -65,8 +65,8 @@ namespace CSharp
                 });
         }
 
-        [FunctionName("Connect")]
-        public static Task Connect(
+        [FunctionName("connect")]
+        public static Task connect(
         [HttpTrigger(AuthorizationLevel.Anonymous, "post")] ConnectType message,
         [SignalR(HubName = "serverless")] IAsyncCollector<SignalRMessage> signalRMessages)
         {
