@@ -44,7 +44,7 @@ namespace CSharp
         }
 
         [FunctionName("redeemCoupon")]
-        public static Task redeemCoupon(
+        public static Task RedeemCoupon(
         [HttpTrigger(AuthorizationLevel.Anonymous, "post")] RequestType message,
         [SignalR(HubName = "serverless")] IAsyncCollector<SignalRMessage> signalRMessages)
         {
@@ -61,7 +61,8 @@ namespace CSharp
                 {
                     // the message will only be sent to this user ID
                     ConnectionId = connectionId,
-                    Target = "redeemCoupon",
+                    Target = "newMessage",
+                    Arguments = new[] { message.Data }
                 });
         }
 
